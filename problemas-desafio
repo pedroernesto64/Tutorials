@@ -1,0 +1,47 @@
+07 - Simular um desastre
+    - adicionar uma nova partição de 05GB ao LVM
+    - remover uma das partições do LVM para simular um problema com essa partição/disco rígido
+
+O VG ("GrupoVirtual") e os LVs ("ServArquivos" e "ServWeb") já foram criados. As partições vdb1, vdb2 e vdb3 estão sendo ocupadas pelo LVM.
+
+-----RESTAURAÇÃO CONSERVATIVA-----
+
+# Deletar a partição vdb1
+$ fdisk /dev/vdb
+$ d (delete)
+$ 1 (número da partição)
+$ w (escrever mudanças)
+
+# O fdisk avisará que as alterações serão efetuadas após um reboot, pois o /dev/vdb1 está ocupado
+$ reboot
+
+# Abrir o fdisk novamente e recriar a partição /dev/vdb1
+$ fdisk /dev/vdb1
+$ n (nova partição)
+$ [ENTER] (primeiro setor padrão)
+$ [ENTER] (último setor padrão)
+$ n (não remover assinatura LVM2_member)
+
+# Ao fazer isso, o VG é automaticamente restaurado, como pode ser atestado usando o comando "lsblk"
+
+-----RESTAURAÇÃO DESTRUTIVA-----
+
+# Deletar, rebootar e recriar a partição como nos passos anteriores, porém, removendo a assinatura LVM2_member no final
+
+# Mostrar o status do VG
+$ vgs
+# Ele indica que o PV anteriormente formado por /dev/vdb1 está faltando
+
+# Criar um PV com a partição nova
+$ pvcreate /dev/vdb1
+
+# Tentar extender o VG retorna um erro
+$ vgextend GrupoVirtual /dev/vdb1 --restoremissing
+
+# Removendo a partição defeituosa do VG
+$ vgreduce GrupoVirtual --removemissing --force
+
+# A partição defeituosa foi removida com sucesso, pois o comando "vgs" não indica mais erros. Porém, os LVs também foram removidos.
+
+# Também é possível adicionar o novo PV de /dev/vdb1. Porém ele não restaura o conteúdo perdido
+$ vgextend GrupoVirtual /dev/vdb1

@@ -1,0 +1,200 @@
+INSTALAÇÃO DO ARCH LINUX COM DIRETÓRIOS ROOT E HOME CRIPTOGRAFADOS, PASTA /HOME EM LVM E I3 DM COMO AMBIENTE GRÁFICO
+Pedro Ernesto Duarte Pilchowski - Segi9
+###########################################
+
+# Mudar o layout do teclado para PT-BR
+$ loadkeys br-abnt2
+
+-------------------------------------------
+
+# Entrar no prompt interativo do iwctl
+$ iwctl
+
+# Listar a interface de WI-FI, escanear as redes disponíveis, listá-las e conectar
+$ device list
+$ station [DISPOSITIVO] scan
+$ station [DISPOSITIVO] get-networks
+$ station [DISPOSITIVO] connect SSID
+$ (a senha será requisitada)
+
+-------------------------------------------
+
+# É possível listar a quantidade de pacotes instalados
+$ pacman -Q | wc -l 
+
+-------------------------------------------
+
+# Encontrar o caminho do disco
+$ lsblk
+
+# Particionar o SSD com 4GB para swap
+$ fdisk /dev/sda
+$ n (nova partição)
+$ p (partição primária)
+$ [ENTER] (usar setor inicial sugerido)
+$ +4G (tamanho da partição)
+$ t (mudar tipo da partição)
+$ 82 (código hex do tipo "Linux Swap")
+
+# Criar mais três partições no SSD: 500MB para o /boot, 112GB para o sistema operacional, e 107.1GB para a pasta /home
+$ (processo semelhante ao anterior)
+$ t (muda o tipo da partição)
+$ 1 (selecionando partição swap)
+$ 82 (código para o tipo swap)
+$ a (habilitar o boot em uma partição)
+$ 2 (selecionando partição boot)
+$ w (consolida as mudanças)
+
+# Inicializar a partição swap
+$ mkswap /dev/sda1
+$ swapon /dev/sda1
+
+# Formatar a partição boot com EXT4
+$ mkfs.ext4 /dev/sda2
+
+-------------------------------------------
+
+# Encriptar a partição do sistema
+$ cryptsetup luksFormat /dev/sda3
+$ YES
+$ (inserir e reinserir senha)
+
+# Desbloquear a partição
+$ cryptsetup luksOpen /dev/sda3 [NOME DO DIRETÓRIO QUE SERÁ CRIADO]
+$ cryptsetup luksOpen /dev/sda3 root
+$ (inserir senha)
+
+# Formatar a partição do sistema com btrfs
+$ mkfs.btrfs /dev/mapper/root
+
+# Montar a partição em /mnt
+$ mount /dev/mapper/root /mnt
+
+-------------------------------------------
+
+# Transformar a partição do /home em um PV
+$ pvcreate /dev/sda4
+
+# Adicionar o sda4 ao VG já existente no HD de 1TB
+$ vgextend HD-1-Tera /dev/sda4
+
+# Criar um LV para a pasta /home
+$ lvcreate -n pasta-home -L 107.09g HD-1-Tera
+
+# Criptografar o LV pasta-home
+$ cryptsetup luksFormat /dev/HD-1-Tera/pasta-home
+$ YES
+$ (inserir e reinserir a senha) V0wG0rf4hOP4pEl$
+
+# Abrir o LV criptografado
+$ cryptsetup luksOpen /dev/HD-1-Tera/pasta-home home
+
+# Formatar o LV criptografado da pasta /home com EXT4
+$ mkfs.ext4 /dev/mapper/home
+
+-------------------------------------------
+
+# Instalar os arquivos necessários e alguns programas essenciais
+$ pacstrap -K /mnt base linux linux-firmware iproute2 lvm2 vim man iwd sudo grub cryptsetup lightdm lightdm-gtk-greeter i3-gaps i3status terminator
+
+-------------------------------------------
+
+# Mover o conteúdo gerado na pasta /mnt/boot para a partição /dev/sda2
+$ mkdir aux
+$ mv /mnt/boot/* /aux
+$ mount /dev/sda2 /mnt/boot
+$ mv /aux/* /mnt/boot
+$ rm -r aux
+
+-------------------------------------------
+
+# Modificar o arquivos crypttab para desbloquear o LVM criptografado
+$ blkid | grep home >> /mnt/etc/crypttab
+$ Isolar o nome do diretório de montagem do volume criptografado e seu UUID: "home UUID=[UUID]"
+
+-------------------------------------------
+
+# Gerar um arquivo fstab
+$ genfstab -U /mnt >> /mnt/etc/fstab
+
+# Mudar a pasta root para o ponto de montagem
+$ arch-chroot /mnt
+
+-------------------------------------------
+
+# Fazer a configuração persistente do teclado
+$ vim /etc/vconsole.conf
+$ inserir "KEYMAP=br-abnt2"
+
+-------------------------------------------
+
+# Configurar o horário local
+$ ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
+$ hwclock --systohc
+
+-------------------------------------------
+
+# Modificar o mkinitcpio para que a partição root seja desbloqueada no boot
+$ vim /etc/mkinitcpio.conf
+$ Adicionar "encrypt lvm2" depois de "block" na linha "HOOKS"
+
+# Consolidar as alterações
+$ mkinitcpio -p linux
+
+-------------------------------------------
+
+# Editar o arquivo de configuração do GRUB para receber senha na hora do boot
+$ blkid /dev/sda3 >> /etc/default/grub
+$ vim /etc/default/grub
+$ Na quarta linha: GRUB_CMDLINE_LINUX_DEFAULT="cryptdevice=UUID=[UUID]:root loglevel=3 quiet"
+
+# Instalar e configurar o GRUB
+$ grub-install --target=i386-pc /dev/sda
+$ grub-mkconfig -o /boot/grub/grub.cfg
+
+-------------------------------------------
+
+# Definir senha do root
+$ passwd
+
+# Habilitar a criação de usuários sudo
+$ visudo
+$ Descomentar a linha "%wheel ALL=(ALL:ALL) ALL"
+
+# Adicionar usuário
+$ useradd -G [GRUPOS] -d [CAMINHO DO DIRETÓRIO HOME] -m [NOME DO USUÁRIO] -p [SENHA]
+$ useradd -G wheel -d /home/peterpilk -m peterpilk -p [SENHA]
+
+-------------------------------------------
+
+# Criar arquivo de configuração para o systemd-networkd
+$ vim /etc/systemd/network/[NÍVEL DE PRIORIDADE]-[NOME DA INTERFACE].network (Ex: 05-enp1s0.network)
+$ Escrever o seguinte: 
+    [Match]
+    Name=[NOME DA INTERFACE]
+    
+    [Network]
+    DHCP=yes
+    IgnoreCarrierLoss=3s
+
+# Habilitar systemd-networkd no boot (gerenciador de redes)
+$ systemctl enable systemd-networkd
+
+# Habilitar systemd-resolved no boot (gerenciador de DHCP)
+$ systemctl enable systemd-resolved
+
+# Habilitar iwd no boot (conexão de WI-FI)
+$ systemctl enable iwd
+
+-------------------------------------------
+
+# Habilitar o lightdm (gerenciador de display)
+$ systemctl enable lightdm
+
+-------------------------------------------
+
+# Sair do ambiente chroot e reiniciar o computador
+$ exit
+$ reboot
+
+$ Fazer login e conectar novamente ao WI-FI como demonstrado anteriormente

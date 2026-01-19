@@ -1,0 +1,81 @@
+#: Title : Desafio 3 - LVM
+#: Author : Pedro Ernesto Duarte Pilchowski
+#: Description : Passo-a-passo para criar e gerenciar LVs em uma máquina virtual
+#: Reference :  https://wiki.debian.org/LVM#Create_a_PV
+				https://www.redhat.com/sysadmin/create-volume-group
+
+#
+# Comandos
+#
+
+# Instalar o Debian 11 normalmente no KVM
+
+# Desligar a VM e, no menu do KVM, ir até "add hardware" e adicionar o disco de 20gb. Ligar a VM novamente
+
+# Fazer login como root
+
+# Abrir o fdisk com o novo disco
+$ fdisk [ENDEREÇO DO DISCO]
+$ fdisk /dev/vdb
+
+# Particionar o disco com uma partição de 5Gb
+$ n (nova partição)
+$ p (primary)
+$ [ENTER] (número padrão para a partição)
+$ [ENTER] (primeiro setor padrão)
+$ +5G (tamanho da partição)
+# Repetir o processo mais 3x
+
+# Instalar o gerenciador de LVM
+$ apt install lvm2
+
+# Criar PVs com as três primeiras partições
+$ pvcreate [ENDEREÇO DAS PARTIÇÕES]
+$ pvcreate /dev/vdb1 /dev/vdb2 /dev/vdb3
+
+# Criar um VG com as PVs existentes
+$ vgcreate [NOME DO VG] [ENDEREÇO DOS PVs]
+$ vgcreate GrupoVirtual /dev/vdb1 /dev/vdb2 /dev/vdb3
+
+# Criar LVs a partir do VG
+$ lvcreate -n [NOME DO LV] -L [TAMANHO (m,g,t)] [NOME DO VG]
+$ lvcreate -n ServArquivos -L 10g GrupoVirtual
+$ lvcreate -n ServWeb -L 5g GrupoVirtual
+
+# Formatar e montar LVs
+$ mkfs.ext4 [CAMINHO DO LV]
+$ mkfs.ext4 /dev/GrupoVirtual/ServArquivos
+$ mkfs.ext4 /dev/GrupoVirtual/ServWeb
+$ mkdir /mnt/ServArquivos
+$ mkdir /mnt/ServWeb
+$ mount /dev/GrupoVirtual/ServArquivos /mnt/ServArquivos
+$ mount /dev/GrupoVirtual/ServWeb /mnt/ServWeb
+
+# Deletar a partição vdb1
+$ fdisk /dev/vdb
+$ d (delete)
+$ 1 (número da partição)
+$ w (escrever mudanças)
+
+# O fdisk avisará que as alterações serão efetuadas após um reboot, pois o /dev/vdb1 está ocupado
+$ reboot
+
+# Abrir o fdisk novamente e recriar a partição /dev/vdb1
+$ fdisk /dev/vdb1
+$ n (nova partição)
+$ [ENTER] (primeiro setor padrão)
+$ [ENTER] (último setor padrão)
+$ n (não remover assinatura LVM2_member)
+
+# Ao fazer isso, o VG é automaticamente restaurado, como pode ser atestado usando o comando "lsblk"
+
+# Expandir o volume do servidor web
+$ lvextend [CAMINHO DO LV] [CAMINHO DO PV]
+$ lvextend /dev/GrupoVirtual/ServWeb /dev/vdb4
+
+# Deletar o LVM
+$ vgremove [NOME DO VG]
+$ vgremove GrupoVirtual
+$ y (Remover VG GrupoVirtual)
+$ y (Remover LV ServArquivos)
+$ y (Remover LV ServWeb)
